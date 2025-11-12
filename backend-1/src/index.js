@@ -1,5 +1,6 @@
 // File: /backend/src/index.js
 
+require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
@@ -9,8 +10,9 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-// MongoDB Connection (add your connection string)
-mongoose.connect('mongodb+srv://ajaysaini:ajaysaini@sahyog.2z6va4e.mongodb.net/softcomputing', {
+// MongoDB Connection (from environment variables)
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://ajaysaini:ajaysaini@sahyog.2z6va4e.mongodb.net/softcomputing';
+mongoose.connect(MONGODB_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true
 });

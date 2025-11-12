@@ -10,7 +10,7 @@ export default function Payment() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
-    const API_URL = "http://localhost:4000/api/numbers";
+    const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000/api/numbers";
 
     useEffect(() => {
         if (orderId) {

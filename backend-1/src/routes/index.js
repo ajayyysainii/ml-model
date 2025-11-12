@@ -2,19 +2,31 @@
 
 const express = require('express');
 const router = express.Router();
-const NumberModel = require('../models/number.model');
+const NumberModel = require('../models/number.model'); // This will be used for registered plates
+const GuestNumberModel = require('../models/guestNumber.model'); // For guest plates with payment
 const PaymentModel = require('../models/payment.model');
 const Razorpay = require('razorpay');
 const QRCode = require('qrcode');
 require('dotenv').config();
 
 // Initialize Razorpay (use environment variables or defaults for testing)
+const razorpayKeyId = process.env.RAZORPAY_KEY_ID || 'rzp_test_1234567890';
+const razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET || 'your_secret_key';
+
+// Validate Razorpay credentials
+if (!razorpayKeyId || razorpayKeyId === 'rzp_test_1234567890' || 
+    !razorpayKeySecret || razorpayKeySecret === 'your_secret_key') {
+    console.warn('⚠️  WARNING: Razorpay credentials not properly configured!');
+    console.warn('   Please set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in your .env file');
+    console.warn('   Get your keys from: https://dashboard.razorpay.com/app/keys');
+}
+
 const razorpay = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_1234567890', // Replace with your key
-    key_secret: process.env.RAZORPAY_KEY_SECRET || 'your_secret_key' // Replace with your secret
+    key_id: razorpayKeyId,
+    key_secret: razorpayKeySecret
 });
 
-// Route to create a new number entry
+// Route to create a new registered number entry
 router.post('/numbers', async (req, res) => {
     try {
         const { numberPlate, timestamp } = req.body;
@@ -26,11 +38,31 @@ router.post('/numbers', async (req, res) => {
     }
 });
 
-// Route to get all number entries
+// Route to get all registered number entries
 router.get('/numbers', async (req, res) => {
     try {
-        const numbers = await NumberModel.find();
+        const numbers = await NumberModel.find().sort({ timestamp: -1 });
         res.status(200).json(numbers);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// Route to get all registered number plates
+router.get('/registered', async (req, res) => {
+    try {
+        const numbers = await NumberModel.find().sort({ timestamp: -1 });
+        res.status(200).json(numbers);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// Route to get all guest number plates (with payment data)
+router.get('/guests', async (req, res) => {
+    try {
+        const guests = await GuestNumberModel.find().sort({ timestamp: -1 });
+        res.status(200).json(guests);
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -123,6 +155,15 @@ router.post('/payment/create', async (req, res) => {
             });
         }
 
+        // Validate Razorpay credentials before creating order
+        if (!razorpayKeyId || razorpayKeyId === 'rzp_test_1234567890' || 
+            !razorpayKeySecret || razorpayKeySecret === 'your_secret_key') {
+            return res.status(500).json({ 
+                message: 'Razorpay credentials not configured. Please set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in .env file',
+                error: 'RAZORPAY_CONFIG_MISSING'
+            });
+        }
+
         // Create Razorpay order
         const orderOptions = {
             amount: amount * 100, // Convert to paise
@@ -133,7 +174,25 @@ router.post('/payment/create', async (req, res) => {
             }
         };
 
-        const order = await razorpay.orders.create(orderOptions);
+        let order;
+        try {
+            order = await razorpay.orders.create(orderOptions);
+        } catch (razorpayError) {
+            console.error('Razorpay order creation error:', razorpayError);
+            
+            // Check if it's an authentication error
+            if (razorpayError.statusCode === 401 || 
+                (razorpayError.error && razorpayError.error.code === 'BAD_REQUEST_ERROR')) {
+                return res.status(401).json({ 
+                    message: 'Razorpay authentication failed. Please check your RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in .env file',
+                    error: 'RAZORPAY_AUTH_FAILED',
+                    details: razorpayError.error || razorpayError.message
+                });
+            }
+            
+            // Re-throw other errors to be caught by outer catch
+            throw razorpayError;
+        }
 
         // Create payment URL - use Razorpay checkout or payment link
         const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
@@ -234,30 +293,52 @@ router.post('/payment/create', async (req, res) => {
         res.status(201).json(response);
     } catch (error) {
         console.error('Payment creation error:', error);
-        res.status(500).json({ message: error.message || 'Failed to create payment' });
+        
+        // Provide more specific error messages
+        if (error.statusCode === 401 || (error.error && error.error.code === 'BAD_REQUEST_ERROR')) {
+            return res.status(401).json({ 
+                message: 'Razorpay authentication failed. Please check your credentials in .env file',
+                error: 'RAZORPAY_AUTH_FAILED',
+                details: error.error || error.message
+            });
+        }
+        
+        res.status(500).json({ 
+            message: error.message || 'Failed to create payment',
+            error: error.name || 'UNKNOWN_ERROR'
+        });
     }
 });
 
-// Helper function to save number plate after payment
-async function saveNumberPlateAfterPayment(numberPlate) {
+// Helper function to save number plate to guest collection after payment
+async function saveGuestNumberPlateAfterPayment(payment) {
     try {
-        const plateUpper = numberPlate.toUpperCase();
-        // Check if plate already exists
-        const existingPlate = await NumberModel.findOne({ numberPlate: plateUpper });
-        if (!existingPlate) {
-            const newNumber = new NumberModel({ 
+        const plateUpper = payment.numberPlate.toUpperCase();
+        // Check if guest plate already exists
+        const existingGuest = await GuestNumberModel.findOne({ 
+            numberPlate: plateUpper,
+            razorpayOrderId: payment.razorpayOrderId
+        });
+        
+        if (!existingGuest) {
+            const guestNumber = new GuestNumberModel({
                 numberPlate: plateUpper,
+                razorpayOrderId: payment.razorpayOrderId,
+                razorpayPaymentId: payment.razorpayPaymentId || null,
+                amount: payment.amount,
+                transactionId: payment.razorpayPaymentId || payment.razorpayOrderId,
+                paidAt: payment.paidAt || new Date(),
                 timestamp: new Date()
             });
-            await newNumber.save();
-            console.log(`✓ Number plate ${plateUpper} saved to database after payment`);
+            await guestNumber.save();
+            console.log(`✓ Guest number plate ${plateUpper} saved to guest database after payment`);
             return true;
         } else {
-            console.log(`ℹ Number plate ${plateUpper} already exists in database`);
+            console.log(`ℹ Guest number plate ${plateUpper} already exists in guest database`);
             return true; // Return true even if exists, as it's already saved
         }
     } catch (error) {
-        console.error(`✗ Error saving number plate ${numberPlate}:`, error.message || error);
+        console.error(`✗ Error saving guest number plate ${payment.numberPlate}:`, error.message || error);
         return false;
     }
 }
@@ -306,8 +387,8 @@ router.get('/payment/status/:orderId', async (req, res) => {
                     await payment.save();
                     console.log(`✓ Payment status updated to completed`);
                     
-                    // Save number plate to database after successful payment
-                    const saved = await saveNumberPlateAfterPayment(payment.numberPlate);
+                    // Save number plate to guest database after successful payment
+                    const saved = await saveGuestNumberPlateAfterPayment(payment);
                     console.log(`✓ Payment verified via order payments. Plate saved: ${saved}`);
                     
                     return res.status(200).json({
@@ -329,7 +410,7 @@ router.get('/payment/status/:orderId', async (req, res) => {
                 payment.paidAt = new Date();
                 await payment.save();
                 
-                const saved = await saveNumberPlateAfterPayment(payment.numberPlate);
+                const saved = await saveGuestNumberPlateAfterPayment(payment);
                 console.log(`✓ Payment verified via order status. Plate saved: ${saved}`);
                 
                 return res.status(200).json({
@@ -358,7 +439,7 @@ router.get('/payment/status/:orderId', async (req, res) => {
                             payment.paidAt = new Date();
                             await payment.save();
                             
-                            const saved = await saveNumberPlateAfterPayment(payment.numberPlate);
+                            const saved = await saveGuestNumberPlateAfterPayment(payment);
                             console.log(`✓ Payment verified via payment link. Plate saved: ${saved}`);
                             
                             return res.status(200).json({
@@ -396,7 +477,7 @@ router.get('/payment/status/:orderId', async (req, res) => {
                         payment.paidAt = new Date();
                         await payment.save();
                         
-                        const saved = await saveNumberPlateAfterPayment(payment.numberPlate);
+                        const saved = await saveGuestNumberPlateAfterPayment(payment);
                         console.log(`✓ Payment verified via payment search. Plate saved: ${saved}`);
                         
                         return res.status(200).json({
@@ -557,8 +638,8 @@ router.post('/payment/webhook', async (req, res) => {
                     await payment.save();
                     console.log(`✓ Payment status updated to completed`);
                     
-                    // Save number plate to database after successful payment
-                    const saved = await saveNumberPlateAfterPayment(payment.numberPlate);
+                    // Save number plate to guest database after successful payment
+                    const saved = await saveGuestNumberPlateAfterPayment(payment);
                     console.log(`✓ Payment webhook: Payment completed for ${payment.numberPlate}. Plate saved: ${saved}`);
                     console.log('=== WEBHOOK PROCESSED SUCCESSFULLY ===\n');
                 } else {
@@ -614,7 +695,7 @@ router.post('/payment/verify/:orderId', async (req, res) => {
                                 payment.paidAt = new Date();
                                 await payment.save();
                                 
-                                const saved = await saveNumberPlateAfterPayment(payment.numberPlate);
+                                const saved = await saveGuestNumberPlateAfterPayment(payment);
                                 console.log(`✓ Payment verified via payment link. Plate saved: ${saved}`);
                                 
                                 return res.status(200).json({
@@ -656,7 +737,7 @@ router.post('/payment/verify/:orderId', async (req, res) => {
                         payment.paidAt = new Date();
                         await payment.save();
                         
-                        const saved = await saveNumberPlateAfterPayment(payment.numberPlate);
+                        const saved = await saveGuestNumberPlateAfterPayment(payment);
                         console.log(`✓ Payment verified and plate saved: ${saved}`);
                         
                         return res.status(200).json({

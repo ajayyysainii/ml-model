@@ -21,14 +21,23 @@ from queue import Queue
 import re
 import webbrowser
 from urllib.parse import urlencode
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 class LicensePlateDetector:
-    def __init__(self, api_url="http://localhost:4000/api/numbers/numbers"):
+    def __init__(self, api_url=None):
         """Initialize the license plate detector"""
         print("Initializing Enhanced License Plate Detector...")
         
-        # API endpoint
-        self.api_url = api_url
+        # API endpoint - use environment variable or parameter or default
+        if api_url is None:
+            backend_url = os.getenv('BACKEND_API_URL', 'http://localhost:4000')
+            self.api_url = f"{backend_url}/api/numbers/numbers"
+        else:
+            self.api_url = api_url
         print(f"API Endpoint: {self.api_url}")
         
         # Queue for async API requests
@@ -198,6 +207,7 @@ class LicensePlateDetector:
                 "amount": 50  # Default parking fee
             }
             
+            print(f"   → Creating payment order for {plate_text}...")
             response = requests.post(url, json=payload, timeout=5)
             
             if response.status_code in [200, 201]:
@@ -206,14 +216,48 @@ class LicensePlateDetector:
                 qr_code_url = data.get('qrCodeUrl')
                 payment_url = data.get('paymentUrl')  # Frontend payment URL
                 
+                if not order_id:
+                    print(f"✗ Error: No orderId in response")
+                    print(f"   Response: {response.text[:200]}")
+                    return None, None, None
+                
                 # Store pending payment
                 with self.pending_payments_lock:
                     self.pending_payments[plate_text] = order_id
                 
                 return order_id, qr_code_url, payment_url
+            else:
+                # Log detailed error information
+                print(f"✗ Payment creation failed: Status {response.status_code}")
+                try:
+                    error_data = response.json()
+                    error_message = error_data.get('message', 'Unknown error')
+                    error_type = error_data.get('error', '')
+                    
+                    print(f"   Error message: {error_message}")
+                    
+                    # Provide helpful messages for specific errors
+                    if error_type == 'RAZORPAY_AUTH_FAILED' or error_type == 'RAZORPAY_CONFIG_MISSING':
+                        print(f"   ⚠️  Razorpay credentials issue detected!")
+                        print(f"   → Please check your .env file in backend-1/")
+                        print(f"   → Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET")
+                        print(f"   → Get keys from: https://dashboard.razorpay.com/app/keys")
+                    
+                    if error_data.get('details'):
+                        print(f"   Details: {error_data.get('details')}")
+                except:
+                    print(f"   Response: {response.text[:200]}")
+                return None, None, None
+        except requests.exceptions.ConnectionError as e:
+            print(f"✗ Connection error: Cannot reach backend at {self.base_api_url}")
+            print(f"   Make sure the backend server is running")
+            return None, None, None
+        except requests.exceptions.Timeout as e:
+            print(f"✗ Timeout error: Backend did not respond within 5 seconds")
             return None, None, None
         except Exception as e:
             print(f"✗ Error creating payment: {e}")
+            print(f"   Error type: {type(e).__name__}")
             return None, None, None
     
     def check_payment_status(self, order_id):
@@ -289,7 +333,7 @@ class LicensePlateDetector:
             
             # Open frontend payment page to show QR code (not Razorpay page)
             try:
-                frontend_url = "http://localhost:5173"
+                frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
                 frontend_payment_url = f"{frontend_url}/payment?orderId={order_id}&plate={plate_text}"
                 
                 webbrowser.open(frontend_payment_url)
@@ -297,7 +341,7 @@ class LicensePlateDetector:
                 print(f"   → Scan QR code to proceed to payment")
             except Exception as e:
                 print(f"   → Error opening browser: {e}")
-                frontend_url = "http://localhost:5173"
+                frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
                 frontend_payment_url = f"{frontend_url}/payment?orderId={order_id}&plate={plate_text}"
                 print(f"   → Please manually visit: {frontend_payment_url}")
                 print(f"   → Scan the QR code shown on that page")
@@ -869,10 +913,9 @@ def main():
     print("With Duplicate Prevention")
     print("=" * 60)
     
-    # Allow user to specify custom API endpoint
-    api_url = input("Enter API URL (default: http://localhost:4000): ").strip()
-    if not api_url:
-        api_url = "http://localhost:4000"
+    # Use backend URL from environment variable
+    backend_url = os.getenv('BACKEND_API_URL', 'http://localhost:4000')
+    api_url = f"{backend_url}/api/numbers/numbers"
     
     detector = LicensePlateDetector(api_url=api_url)
     

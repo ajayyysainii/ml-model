@@ -4,6 +4,8 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import './index.css'
 import App from './App.jsx'
 import Payment from './Payment.jsx'
+import RegisteredPlates from './RegisteredPlates.jsx'
+import GuestPlates from './GuestPlates.jsx'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
@@ -11,6 +13,8 @@ createRoot(document.getElementById('root')).render(
       <Routes>
         <Route path="/" element={<App />} />
         <Route path="/payment" element={<Payment />} />
+        <Route path="/registered" element={<RegisteredPlates />} />
+        <Route path="/guests" element={<GuestPlates />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,
