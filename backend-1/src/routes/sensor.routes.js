@@ -17,14 +17,18 @@ router.post('/data', async (req, res) => {
         }
 
         // Create new sensor data entry with timestamp
-        // If timestamp is provided in request, use it; otherwise use current time
-        const timestamp = req.body.timestamp ? new Date(req.body.timestamp) : Date.now();
-        
-        const sensorData = new SensorModel({
+        // If timestamp is provided in request, use it; otherwise let model use default (Date.now)
+        const sensorDataObj = {
             temperature,
-            humidity,
-            timestamp: timestamp
-        });
+            humidity
+        };
+        
+        // Only add timestamp if provided in request body
+        if (req.body.timestamp) {
+            sensorDataObj.timestamp = new Date(req.body.timestamp);
+        }
+        
+        const sensorData = new SensorModel(sensorDataObj);
 
         await sensorData.save();
         
