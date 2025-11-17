@@ -275,13 +275,29 @@ class LicensePlateDetector:
             return False
     
     def open_gate(self, plate_text, reason="database"):
-        """Log gate open action"""
+        """Log gate open action and trigger backend endpoint for Raspberry Pi"""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"\n{'='*60}")
         print(f"🚪 GATE OPEN - {timestamp}")
         print(f"   Plate: {plate_text}")
         print(f"   Reason: {reason}")
         print(f"{'='*60}\n")
+        
+        # Trigger backend endpoint for Raspberry Pi servo control
+        try:
+            trigger_url = f"{self.base_api_url}/api/numbers/trigger-gate"
+            payload = {
+                "numberPlate": plate_text,
+                "reason": reason
+            }
+            response = requests.post(trigger_url, json=payload, timeout=2)
+            if response.status_code == 200:
+                print(f"✓ Gate trigger sent to backend for Raspberry Pi")
+            else:
+                print(f"⚠ Could not send gate trigger (Status: {response.status_code})")
+        except Exception as e:
+            print(f"⚠ Could not send gate trigger: {e}")
+            # Don't fail the whole process if trigger fails
     
     def handle_plate_detection(self, plate_text):
         """Handle detected plate: check database, payment flow, gate control"""

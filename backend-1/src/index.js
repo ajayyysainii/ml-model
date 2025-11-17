@@ -5,6 +5,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 const numberRoutes = require('./routes/index');
+const sensorRoutes = require('./routes/sensor.routes');
 const cors = require('cors');
 
 const app = express();
@@ -25,6 +26,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 
 // Routes
 app.use('/api/numbers', numberRoutes);
+app.use('/api/sensor', sensorRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

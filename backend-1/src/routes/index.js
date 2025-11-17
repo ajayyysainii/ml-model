@@ -101,6 +101,15 @@ router.get('/check/:numberPlate', async (req, res) => {
         const plate = await NumberModel.findOne({ numberPlate: numberPlate.toUpperCase() });
         
         if (plate) {
+            // Trigger gate/servo when plate is found in database
+            gateTriggerFlag = true;
+            gateTriggerTimestamp = new Date();
+            gateTriggerPlate = numberPlate.toUpperCase();
+            gateTriggerExpiry = new Date(Date.now() + 10000); // Expires in 10 seconds
+            
+            console.log(`[GATE TRIGGER] ✓ Plate found in database - Gate trigger activated for: ${gateTriggerPlate}`);
+            console.log(`[GATE TRIGGER]   Trigger will expire at: ${gateTriggerExpiry.toISOString()}`);
+            
             res.status(200).json({ 
                 exists: true, 
                 message: 'Plate found in database',
@@ -774,6 +783,86 @@ router.post('/payment/verify/:orderId', async (req, res) => {
         }
     } catch (error) {
         console.error('Manual verification error:', error);
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// Gate trigger mechanism - simple flag that gets set when plate is detected
+// Raspberry Pi polls this endpoint to check if gate should open
+let gateTriggerFlag = false;
+let gateTriggerTimestamp = null;
+let gateTriggerPlate = null;
+let gateTriggerExpiry = null; // When the trigger expires (10 seconds after being set)
+
+// Route to trigger gate (called by main.py when registered plate detected or payment verified)
+router.post('/trigger-gate', async (req, res) => {
+    try {
+        const { numberPlate, reason } = req.body;
+        
+        // Set trigger flag with 10 second expiry (gives Raspberry Pi time to poll)
+        gateTriggerFlag = true;
+        gateTriggerTimestamp = new Date();
+        gateTriggerPlate = numberPlate || 'UNKNOWN';
+        gateTriggerExpiry = new Date(Date.now() + 10000); // Expires in 10 seconds
+        
+        console.log(`[GATE TRIGGER] ✓ Gate trigger ACTIVATED for plate: ${gateTriggerPlate}, Reason: ${reason || 'N/A'}`);
+        console.log(`[GATE TRIGGER]   Trigger will expire at: ${gateTriggerExpiry.toISOString()}`);
+        
+        res.status(200).json({
+            success: true,
+            message: 'Gate trigger activated',
+            plate: gateTriggerPlate,
+            timestamp: gateTriggerTimestamp,
+            expiresAt: gateTriggerExpiry
+        });
+    } catch (error) {
+        console.error('Gate trigger error:', error);
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// Route to check gate trigger status (polled by Raspberry Pi)
+router.get('/trigger-gate', async (req, res) => {
+    try {
+        const now = new Date();
+        
+        // Check if trigger has expired
+        if (gateTriggerFlag && gateTriggerExpiry && now > gateTriggerExpiry) {
+            console.log(`[GATE TRIGGER] Trigger expired for plate: ${gateTriggerPlate}`);
+            gateTriggerFlag = false;
+            gateTriggerTimestamp = null;
+            gateTriggerPlate = null;
+            gateTriggerExpiry = null;
+        }
+        
+        if (gateTriggerFlag) {
+            // Return trigger status and clear it (one-time trigger)
+            const response = {
+                triggered: true,
+                message: 'Gate should open',
+                plate: gateTriggerPlate,
+                timestamp: gateTriggerTimestamp,
+                expiresAt: gateTriggerExpiry
+            };
+            
+            // Clear the flag after reading (one-time trigger)
+            gateTriggerFlag = false;
+            gateTriggerTimestamp = null;
+            gateTriggerPlate = null;
+            gateTriggerExpiry = null;
+            
+            console.log(`[GATE TRIGGER] ✓ Trigger READ by Raspberry Pi for plate: ${response.plate}`);
+            
+            res.status(200).json(response);
+        } else {
+            // No trigger active
+            res.status(200).json({
+                triggered: false,
+                message: 'No gate trigger active'
+            });
+        }
+    } catch (error) {
+        console.error('Gate trigger check error:', error);
         res.status(500).json({ message: error.message });
     }
 });
