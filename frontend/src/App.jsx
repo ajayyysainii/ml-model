@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Link } from "react-router-dom";
 import RegisteredPlates from "./RegisteredPlates";
 import GuestPlates from "./GuestPlates";
 
@@ -8,9 +9,17 @@ export default function App() {
     return (
         <div className="min-h-screen bg-gradient-to-br from-gray-100 to-blue-50 font-sans text-gray-900">
             <div className="px-4 py-6">
-                <div className="mb-6">
-                    <h1 className="text-3xl font-bold tracking-tight text-gray-900 mb-2">License Plate Management</h1>
-                    <p className="text-sm text-gray-500">View registered and guest number plates</p>
+                <div className="mb-6 flex justify-between items-center">
+                    <div>
+                        <h1 className="text-3xl font-bold tracking-tight text-gray-900 mb-2">License Plate Management</h1>
+                        <p className="text-sm text-gray-500">View registered and guest number plates</p>
+                    </div>
+                    <Link
+                        to="/sensor"
+                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium shadow-sm"
+                    >
+                        View Sensor Data
+                    </Link>
                 </div>
                 
                 {/* Tab Navigation */}
