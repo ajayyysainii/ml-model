@@ -106,6 +106,7 @@ router.get('/check/:numberPlate', async (req, res) => {
             gateTriggerTimestamp = new Date();
             gateTriggerPlate = numberPlate.toUpperCase();
             gateTriggerExpiry = new Date(Date.now() + 10000); // Expires in 10 seconds
+            gateTriggerReadAt = null; // Reset read timestamp when new trigger is set
             
             console.log(`[GATE TRIGGER] ✓ Plate found in database - Gate trigger activated for: ${gateTriggerPlate}`);
             console.log(`[GATE TRIGGER]   Trigger will expire at: ${gateTriggerExpiry.toISOString()}`);
@@ -793,6 +794,7 @@ let gateTriggerFlag = false;
 let gateTriggerTimestamp = null;
 let gateTriggerPlate = null;
 let gateTriggerExpiry = null; // When the trigger expires (10 seconds after being set)
+let gateTriggerReadAt = null; // When the trigger was last read (to keep it active for a few seconds)
 
 // Route to trigger gate (called by main.py when registered plate detected or payment verified)
 router.post('/trigger-gate', async (req, res) => {
@@ -804,6 +806,7 @@ router.post('/trigger-gate', async (req, res) => {
         gateTriggerTimestamp = new Date();
         gateTriggerPlate = numberPlate || 'UNKNOWN';
         gateTriggerExpiry = new Date(Date.now() + 10000); // Expires in 10 seconds
+        gateTriggerReadAt = null; // Reset read timestamp when new trigger is set
         
         console.log(`[GATE TRIGGER] ✓ Gate trigger ACTIVATED for plate: ${gateTriggerPlate}, Reason: ${reason || 'N/A'}`);
         console.log(`[GATE TRIGGER]   Trigger will expire at: ${gateTriggerExpiry.toISOString()}`);
@@ -833,10 +836,24 @@ router.get('/trigger-gate', async (req, res) => {
             gateTriggerTimestamp = null;
             gateTriggerPlate = null;
             gateTriggerExpiry = null;
+            gateTriggerReadAt = null;
+        }
+        
+        // If trigger was read, keep it active for 3 seconds to allow multiple polls
+        if (gateTriggerFlag && gateTriggerReadAt) {
+            const timeSinceRead = now - gateTriggerReadAt;
+            if (timeSinceRead > 3000) { // 3 seconds after being read, clear it
+                console.log(`[GATE TRIGGER] Trigger cleared after being read (3 seconds passed) for plate: ${gateTriggerPlate}`);
+                gateTriggerFlag = false;
+                gateTriggerTimestamp = null;
+                gateTriggerPlate = null;
+                gateTriggerExpiry = null;
+                gateTriggerReadAt = null;
+            }
         }
         
         if (gateTriggerFlag) {
-            // Return trigger status and clear it (one-time trigger)
+            // Return trigger status
             const response = {
                 triggered: true,
                 message: 'Gate should open',
@@ -845,13 +862,11 @@ router.get('/trigger-gate', async (req, res) => {
                 expiresAt: gateTriggerExpiry
             };
             
-            // Clear the flag after reading (one-time trigger)
-            gateTriggerFlag = false;
-            gateTriggerTimestamp = null;
-            gateTriggerPlate = null;
-            gateTriggerExpiry = null;
-            
-            console.log(`[GATE TRIGGER] ✓ Trigger READ by Raspberry Pi for plate: ${response.plate}`);
+            // Mark as read (but don't clear immediately - keep active for 3 seconds)
+            if (!gateTriggerReadAt) {
+                gateTriggerReadAt = new Date();
+                console.log(`[GATE TRIGGER] ✓ Trigger READ by Raspberry Pi for plate: ${response.plate} (will stay active for 3 seconds)`);
+            }
             
             res.status(200).json(response);
         } else {

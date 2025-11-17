@@ -14,12 +14,20 @@ export default function App() {
                         <h1 className="text-3xl font-bold tracking-tight text-gray-900 mb-2">License Plate Management</h1>
                         <p className="text-sm text-gray-500">View registered and guest number plates</p>
                     </div>
-                    <Link
-                        to="/sensor"
-                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium shadow-sm"
-                    >
-                        View Sensor Data
-                    </Link>
+                    <div className="flex gap-3">
+                        <Link
+                            to="/register"
+                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium shadow-sm"
+                        >
+                            Register New Plate
+                        </Link>
+                        <Link
+                            to="/sensor"
+                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium shadow-sm"
+                        >
+                            View Sensor Data
+                        </Link>
+                    </div>
                 </div>
                 
                 {/* Tab Navigation */}

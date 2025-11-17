@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 export default function RegisteredPlates() {
     const [items, setItems] = useState([]);
@@ -48,13 +49,21 @@ export default function RegisteredPlates() {
                     <div className="text-2xl font-semibold tracking-tight text-gray-900">Registered Number Plates</div>
                     <div className="text-xs text-gray-400 mt-1">Whitelisted plates that don't require payment</div>
                 </div>
-                <button
-                    className="bg-white border border-gray-200 px-4 py-2 rounded-xl shadow-sm hover:bg-gray-50 focus:ring-2 focus:ring-blue-100 transition active:bg-gray-100 disabled:opacity-60"
-                    onClick={fetchList}
-                    disabled={loading}
-                >
-                    {loading ? "Loading…" : "Refresh"}
-                </button>
+                <div className="flex gap-3">
+                    <Link
+                        to="/register"
+                        className="bg-blue-600 text-white px-4 py-2 rounded-xl shadow-sm hover:bg-blue-700 focus:ring-2 focus:ring-blue-100 transition active:bg-blue-800 text-sm font-medium"
+                    >
+                        + Register New
+                    </Link>
+                    <button
+                        className="bg-white border border-gray-200 px-4 py-2 rounded-xl shadow-sm hover:bg-gray-50 focus:ring-2 focus:ring-blue-100 transition active:bg-gray-100 disabled:opacity-60"
+                        onClick={fetchList}
+                        disabled={loading}
+                    >
+                        {loading ? "Loading…" : "Refresh"}
+                    </button>
+                </div>
             </div>
             {error && (
                 <div className="bg-red-100 border border-red-200 rounded px-3 py-2 mb-3 text-red-700 animate-in fade-in">

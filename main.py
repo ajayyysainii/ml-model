@@ -45,9 +45,11 @@ class LicensePlateDetector:
         self.api_thread = None
         self.stop_api_thread = False
         
-        # Track sent plates to prevent duplicates
-        self.sent_plates = set()
+        # Track sent plates with timestamps for time-based duplicate prevention (optional)
+        # Changed: Allow same plate to be detected multiple times, but prevent rapid duplicates (within 2 seconds)
+        self.sent_plates = {}  # {plate_text: timestamp} - track when plate was last processed
         self.sent_plates_lock = threading.Lock()
+        self.DUPLICATE_COOLDOWN = 2  # seconds - minimum time between same plate detections
         
         # Track plates being processed for payment
         self.pending_payments = {}  # {plate_text: order_id}
@@ -122,9 +124,9 @@ class LicensePlateDetector:
                             print(f"✓ Data sent successfully to API")
                             print(f"  Response: {response.text}")
                             
-                            # Mark as successfully sent
+                            # Mark as successfully sent (with timestamp)
                             with self.sent_plates_lock:
-                                self.sent_plates.add(data['numberPlate'])
+                                self.sent_plates[data['numberPlate']] = time.time()
                         else:
                             print(f"✗ API Error: Status code {response.status_code}")
                             # Don't add to sent_plates if failed, allow retry
@@ -300,45 +302,53 @@ class LicensePlateDetector:
             # Don't fail the whole process if trigger fails
     
     def handle_plate_detection(self, plate_text):
-        """Handle detected plate: check database, payment flow, gate control"""
+        """Handle detected plate: check database, payment flow, gate control
+        Always checks database every time, even for same plate shown multiple times"""
         if len(plate_text) != 10:
             return
         
-        # Check if already processed
-        with self.sent_plates_lock:
-            if plate_text in self.sent_plates:
-                return
+        current_time = time.time()
+        print(f"\n[PROCESSING] Checking plate: {plate_text} (always checks database)")
         
-        print(f"\n[PROCESSING] Checking plate: {plate_text}")
-        
-        # Step 1: Check if plate exists in database
+        # Step 1: ALWAYS check if plate exists in database (no cooldown for database checks)
         if self.check_plate_in_database(plate_text):
-            print(f"✓ Plate found in database (whitelisted)")
+            print(f"✓ Plate found in database (whitelisted) - Opening gate")
             self.open_gate(plate_text, "Found in database")
-            
-            # Mark as processed
+            # Update timestamp for tracking (but don't block future checks)
             with self.sent_plates_lock:
-                self.sent_plates.add(plate_text)
+                self.sent_plates[plate_text] = current_time
             return
         
         print(f"✗ Plate NOT found in database - Payment required")
         
-        # Step 2: Check if payment already completed
+        # Step 2: Check if payment already completed (checks every time)
         try:
             url = f"{self.base_api_url}/api/numbers/payment/plate/{plate_text}"
             response = requests.get(url, timeout=3)
             if response.status_code == 200:
                 data = response.json()
                 if data.get('paid', False):
-                    print(f"✓ Payment already completed for this plate")
+                    print(f"✓ Payment already completed for this plate - Opening gate")
                     self.open_gate(plate_text, "Payment verified")
+                    # Update timestamp for tracking (but don't block future checks)
                     with self.sent_plates_lock:
-                        self.sent_plates.add(plate_text)
+                        self.sent_plates[plate_text] = current_time
                     return
         except:
             pass
         
-        # Step 3: Create payment and show QR code
+        # Step 3: Check cooldown only for payment QR generation (to prevent spam)
+        with self.sent_plates_lock:
+            if plate_text in self.sent_plates:
+                last_processed = self.sent_plates[plate_text]
+                time_since_last = current_time - last_processed
+                if time_since_last < self.DUPLICATE_COOLDOWN:
+                    # Too soon since last payment QR - skip to prevent spam
+                    print(f"[SKIP] Payment QR for {plate_text} shown too recently ({time_since_last:.1f}s ago). Cooldown: {self.DUPLICATE_COOLDOWN}s")
+                    print(f"      (Database was still checked - plate not registered)")
+                    return
+        
+        # Step 4: Create payment and show QR code (only if not in cooldown)
         order_id, qr_code_url, payment_url = self.create_payment_qr(plate_text)
         
         if order_id and qr_code_url:
@@ -381,9 +391,9 @@ class LicensePlateDetector:
                     print(f"\n✓ Payment completed for {plate_text}!")
                     self.open_gate(plate_text, "Payment successful")
                     
-                    # Mark as processed
+                    # Mark as processed (with timestamp)
                     with self.sent_plates_lock:
-                        self.sent_plates.add(plate_text)
+                        self.sent_plates[plate_text] = time.time()
                     
                     # Remove from pending
                     with self.pending_payments_lock:

@@ -13,11 +13,12 @@ import os
 # Try to import GPIO libraries (for Raspberry Pi)
 GPIO_AVAILABLE = False
 Servo = None
+LED = None
 PiGPIOFactory = None
 GPIO = None
 
 try:
-    from gpiozero import Servo
+    from gpiozero import Servo, LED
     try:
         from gpiozero.pins.pigpio import PiGPIOFactory
     except ImportError:
@@ -41,7 +42,86 @@ BACKEND_URL = os.getenv('BACKEND_URL', 'http://10.122.220.83:4000')  # Change to
 ENDPOINT = os.getenv('ENDPOINT', '/api/numbers/trigger-gate')  # Endpoint to check for gate trigger
 CHECK_INTERVAL = 2  # Check every 2 seconds
 SERVO_PIN = 17  # GPIO pin for servo (change if needed)
+LED_PIN = 27  # GPIO pin for LED (change if needed - common pins: 18, 27, 22)
 SERVO_ROTATION_TIME = 10  # Time to continuously rotate servo (seconds)
+
+
+class LEDController:
+    """Controls LED using gpiozero or RPi.GPIO"""
+    
+    def __init__(self, pin=27):
+        self.pin = pin
+        self.is_on = False
+        
+        if not GPIO_AVAILABLE:
+            print("Running in simulation mode - no actual LED control")
+            self.led = None
+            return
+        
+        try:
+            # Try using gpiozero (preferred method)
+            if LED is not None:
+                self.led = LED(pin)
+                self.method = 'gpiozero'
+                print(f"✓ LED initialized on GPIO {pin} using gpiozero")
+            elif GPIO is not None:
+                # Use RPi.GPIO directly
+                GPIO.setup(pin, GPIO.OUT)
+                GPIO.output(pin, GPIO.LOW)  # Start with LED off
+                self.led = pin
+                self.method = 'RPi.GPIO'
+                print(f"✓ LED initialized on GPIO {pin} using RPi.GPIO")
+            else:
+                raise Exception("No GPIO libraries available")
+        except Exception as e:
+            print(f"Error initializing LED: {e}")
+            self.led = None
+            self.method = None
+    
+    def on(self):
+        """Turn LED on"""
+        if self.led is None:
+            print("[SIMULATION] LED would turn ON")
+            self.is_on = True
+            return
+        
+        try:
+            if self.method == 'gpiozero':
+                self.led.on()
+            elif self.method == 'RPi.GPIO':
+                GPIO.output(self.led, GPIO.HIGH)
+            self.is_on = True
+            print(f"LED turned ON (GPIO {self.pin})")
+        except Exception as e:
+            print(f"Error turning LED on: {e}")
+    
+    def off(self):
+        """Turn LED off"""
+        if self.led is None:
+            print("[SIMULATION] LED would turn OFF")
+            self.is_on = False
+            return
+        
+        try:
+            if self.method == 'gpiozero':
+                self.led.off()
+            elif self.method == 'RPi.GPIO':
+                GPIO.output(self.led, GPIO.LOW)
+            self.is_on = False
+            print(f"LED turned OFF (GPIO {self.pin})")
+        except Exception as e:
+            print(f"Error turning LED off: {e}")
+    
+    def cleanup(self):
+        """Clean up LED resources"""
+        if self.led is not None:
+            try:
+                self.off()  # Turn off before cleanup
+                if self.method == 'gpiozero':
+                    self.led.close()
+                print("LED cleaned up")
+            except Exception as e:
+                print(f"Error cleaning up LED: {e}")
 
 
 class ServoController:
@@ -132,14 +212,18 @@ class ServoController:
             import traceback
             traceback.print_exc()
     
-    def start_continuous_rotation(self):
-        """Start continuous rotation of servo"""
+    def start_continuous_rotation(self, led_controller=None):
+        """Start continuous rotation of servo and turn on LED if provided"""
         if self.is_rotating:
             print("Servo already rotating, skipping...")
             return  # Already rotating, ignore
         
         self.is_rotating = True
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Starting continuous rotation...")
+        
+        # Turn on LED when servo starts
+        if led_controller:
+            led_controller.on()
         
         if self.servo is None:
             print(f"[SIMULATION] Servo would rotate continuously")
@@ -157,9 +241,13 @@ class ServoController:
             print(f"Error starting rotation: {e}")
             self.is_rotating = False
     
-    def stop_rotation(self):
-        """Stop continuous rotation and return to neutral position"""
+    def stop_rotation(self, led_controller=None):
+        """Stop continuous rotation and return to neutral position, turn off LED if provided"""
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Stopping rotation...")
+        
+        # Turn off LED when servo stops
+        if led_controller:
+            led_controller.off()
         
         if self.servo is None:
             self.is_rotating = False
@@ -253,12 +341,16 @@ def main():
     print(f"Full URL: {BACKEND_URL}{ENDPOINT}")
     print(f"Check Interval: {CHECK_INTERVAL} seconds")
     print(f"Servo Pin: {SERVO_PIN}")
+    print(f"LED Pin: {LED_PIN}")
     print(f"Rotation Duration: {SERVO_ROTATION_TIME} seconds")
     print("=" * 60)
     print("\nPress Ctrl+C to stop\n")
     
     # Initialize servo
     servo = ServoController(pin=SERVO_PIN)
+    
+    # Initialize LED
+    led = LEDController(pin=LED_PIN)
     
     if servo.servo is None:
         print("ERROR: Servo not initialized. Please check:")
@@ -314,16 +406,16 @@ def main():
             poll_count += 1
             
             if has_trigger:
-                # Gate trigger detected - rotate servo continuously
+                # Gate trigger detected - rotate servo continuously and turn on LED
                 print(f"[{timestamp}] ✓ {message}")
                 print(f"[DEBUG] Poll count: {poll_count}, Trigger detected!")
-                servo.start_continuous_rotation()
+                servo.start_continuous_rotation(led_controller=led)
                 
-                # Keep rotating for the specified duration
+                # Keep rotating for the specified duration (LED stays on)
                 time.sleep(SERVO_ROTATION_TIME)
                 
-                # Stop rotation
-                servo.stop_rotation()
+                # Stop rotation and turn off LED
+                servo.stop_rotation(led_controller=led)
                 time.sleep(0.5)  # Small delay after stopping
                 poll_count = 0  # Reset counter after successful trigger
             else:
@@ -340,14 +432,16 @@ def main():
     
     except KeyboardInterrupt:
         print("\n\nStopping...")
-        servo.stop_rotation()
+        servo.stop_rotation(led_controller=led)
         time.sleep(0.5)
         servo.cleanup()
+        led.cleanup()
         print("Script stopped")
         sys.exit(0)
     except Exception as e:
         print(f"\nError: {e}")
         servo.cleanup()
+        led.cleanup()
         sys.exit(1)
 
 

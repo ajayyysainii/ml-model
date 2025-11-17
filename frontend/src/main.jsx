@@ -7,6 +7,7 @@ import Payment from './Payment.jsx'
 import RegisteredPlates from './RegisteredPlates.jsx'
 import GuestPlates from './GuestPlates.jsx'
 import SensorData from './SensorData.jsx'
+import RegisterPlate from './RegisterPlate.jsx'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
@@ -17,6 +18,7 @@ createRoot(document.getElementById('root')).render(
         <Route path="/registered" element={<RegisteredPlates />} />
         <Route path="/guests" element={<GuestPlates />} />
         <Route path="/sensor" element={<SensorData />} />
+        <Route path="/register" element={<RegisterPlate />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,
